@@ -1,5 +1,6 @@
 import {isArray, isObject} from "../utils";
 import {arrayMethods} from "./array";
+import Dep from "./dep"
 
 // 1.每个对象都有一个__proto__属性 它指向所属类的原型 fn.__proto__ = Function.prototype
 // 2.每个原型上都有一个constructor属性 指向函数本身 Function.prototype.constructor = Function
@@ -42,15 +43,19 @@ class Observer {
 // 4）如果数据不需要响应式 可以使用Object.freeze 冻结属性
 function defineReactive(obj, key, value) { // vue2慢的原因 主要在这个方法中
   observe(value) // 递归进行观测数据 不管有多少层 我都进行defineProperty
+  const dep = new Dep() // 每个属性都增加了一个dep
   Object.defineProperty(obj, key, {
     get() { // 后续会有很多逻辑
+      if (Dep.target) {
+        dep.depend()
+      }
       return value; // 闭包，次此value 会像上层的value进行查找
     },
     set(newValue) {  // 如果设置的是一个对象那么会再次进行劫持
       if (newValue === value) return
       observe(newValue)
-      console.log('修改')
       value = newValue
+      dep.notify()
     }
   })
 }
