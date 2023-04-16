@@ -1,6 +1,7 @@
 import {initState} from "./state";
 import {compileToFunction} from "./compiler";
 import {mountComponent} from "./lifeCycle";
+import {mergeOptions, nextTick} from "./utils";
 
 export function initMixin(Vue) {
   // 后续组件化开发的时候 Vue.extend 可以创造一个子组件 子组件可以继承Vue 子组件也可以调用_init方法
@@ -8,7 +9,7 @@ export function initMixin(Vue) {
     const vm = this
 
     // 把用户的选项放到vue上，这样在其他地方中都可以获取到options了
-    vm.$options = options // 为了后续扩展的方法都可以获取$options选项
+    vm.$options = mergeOptions(vm.constructor.options, options) // 为了后续扩展的方法都可以获取$options选项
 
     // options中用户传入的数据 el data
     initState(vm)
@@ -50,4 +51,6 @@ export function initMixin(Vue) {
     // 这里已经获取到了一个render函数 这个函数他的返回值 _c('div',{id:'app'},_c('span',undefined,'hello'))
     mountComponent(vm)
   }
+
+  Vue.prototype.$nextTick = nextTick
 }

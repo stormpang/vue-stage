@@ -1,6 +1,7 @@
 import {initMixin} from './init'
 import {renderMixin} from "./render";
 import {lifeCycleMixin} from "./lifeCycle";
+import {initGlobalAPI} from "./global-api";
 
 // vue要如何实现 原型模式 所有的功能都通过原型扩展的方式来添加
 function Vue(options) {
@@ -10,6 +11,8 @@ function Vue(options) {
 initMixin(Vue)
 renderMixin(Vue)
 lifeCycleMixin(Vue)
+
+initGlobalAPI(Vue)
 
 // 导出Vue给别人使用
 export default Vue

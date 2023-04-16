@@ -5,12 +5,75 @@
 })(this, (function () { 'use strict';
 
   function isFunction(val) {
-    return typeof val === 'function';
+    return typeof val == 'function';
   }
   function isObject(val) {
-    return typeof val === 'object' && val !== null;
+    return typeof val == 'object' && val !== null;
+  }
+  let callbacks = [];
+  let waiting = false;
+  function flushCallbacks() {
+    callbacks.forEach(fn => fn()); // 按照顺序清空nextTick
+    callbacks = [];
+    waiting = false;
+  }
+  function nextTick(fn) {
+    // vue3 里面的nextTick 就是promise ， vue2里面做了一些兼容性处理
+    callbacks.push(fn);
+    if (!waiting) {
+      Promise.resolve().then(flushCallbacks);
+      waiting = true;
+    }
   }
   let isArray = Array.isArray;
+
+  // {a:1} {b:1,a:2}  => {b:1,a:[1,2]}
+
+  // {}  {beforeCreate:fn}  => {beforecreatre:[fn]}
+  // {beforecreatre:[fn]} {beforeCreate:fn}  => {beforecreatre:[fn,fn]}
+
+  let strats = {}; // 存放所有策略
+
+  let lifeCycle = ['beforeCreate', 'created', 'beforeMount', 'mounted'];
+  lifeCycle.forEach(hook => {
+    strats[hook] = function (parentVal, childVal) {
+      if (childVal) {
+        if (parentVal) {
+          // 父 子 都有值 用父和子拼接在一起， 父有值就一定是数组
+          return parentVal.concat(childVal);
+        } else {
+          // 儿子有值 父亲没有值
+          if (isArray(childVal)) {
+            return childVal;
+          }
+          return [childVal]; // 如果没值 就会变成数组
+        }
+      } else {
+        return parentVal;
+      }
+    };
+  });
+  function mergeOptions(parentVal, childVal) {
+    const options = {};
+    for (let key in parentVal) {
+      mergeFiled(key);
+    }
+    for (let key in childVal) {
+      if (!parentVal.hasOwnProperty(key)) {
+        mergeFiled(key);
+      }
+    }
+    function mergeFiled(key) {
+      // 设计模式 策略模式
+      let strat = strats[key];
+      if (strat) {
+        options[key] = strat(parentVal[key], childVal[key]); // 合并两个值
+      } else {
+        options[key] = childVal[key] || parentVal[key];
+      }
+    }
+    return options;
+  }
 
   let oldArrayPrototype = Array.prototype; // 获取数组的老的原型方法
 
@@ -43,10 +106,37 @@
       if (inserted) {
         ob.observeArray(inserted);
       }
+      ob.dep.notify(); // 触发页面更新流程
     };
   });
 
   // 属性的查找：是先找自己身上的，找不到去原型上查找
+
+  let queue = []; // 这里存放要更新的watcher
+  let has = {}; // 用来存储已有的watcher的id
+
+  function flushSchedulerQueue() {
+    // beforeUpdate
+    queue.forEach(watcher => watcher.run());
+    queue = []; // 这里存放要更新的watcher
+    has = {};
+    pending = false;
+  }
+  let pending = false;
+  function queueWatcher(watcher) {
+    // watcher1 watcher1 watcher1 watcher1  watcher2
+    // 一般情况下 写去重 可以采用这种方式 ，如果你不使用set的时候
+    let id = watcher.id;
+    if (has[id] == null) {
+      has[id] = true;
+      queue.push(watcher); // [watcher1,watcher2]
+      if (!pending) {
+        // 防抖 多次执行 只走1次
+        nextTick(flushSchedulerQueue);
+        pending = true;
+      }
+    }
+  }
 
   let id$1 = 0;
   class Watcher {
@@ -78,9 +168,15 @@
     }
 
     update() {
-      console.log('update');
-
+      // 每次更新数据都会同步调用这个update方法 我可以将更新的逻辑缓存起来 等会同步更新数据的逻辑执行完毕后 依次调用（去重的逻辑）
+      console.log('缓存更新');
+      queueWatcher(this);
       // 可以做异步更新处理
+      // this.get() // vue.nextTick [fn1,fn2,fn3]
+    }
+
+    run() {
+      console.log('真正执行更新');
       this.get();
     }
   }
@@ -113,6 +209,8 @@
     constructor(value) {
       // 不让__ob__被遍历到
       // value.__ob__ = this // 我给对象和数组添加一个自定义属性
+      // 如果给一个对象增添一个不存在的属性 我希望也能更新视图
+      this.dep = new Dep(); // 给对象和数组都增加dep属性 {}.__ob__.dep  [].__ob__.dep
       Object.defineProperty(value, '__ob__', {
         value: this,
         enumerable: false // 表示这个属性不能被列举出来 不能被循环到
@@ -122,6 +220,8 @@
         // 更改数组原型方法，如果是数组 我就改写数组的原型链
         value.__proto__ = arrayMethods;
         this.observeArray(value);
+
+        // 数组 如何依赖收集 而且更新的时候 如何触发更新？
       } else {
         this.walk(value); // 核心就是循环对象
       }
@@ -141,6 +241,15 @@
       });
     }
   }
+  function dependArray(value) {
+    for (let i = 0; i < value.length; i++) {
+      const current = value[i];
+      current.__ob__ && current.__ob__.dep.depend();
+      if (Array.isArray(current)) {
+        dependArray(current);
+      }
+    }
+  }
 
   // vue2应用了defineProperty需要一加载的时候 就进行递归操作 所以耗性能 如果层次过深也会浪费性能
   // 1.性能优化的原则:
@@ -150,13 +259,21 @@
   // 4）如果数据不需要响应式 可以使用Object.freeze 冻结属性
   function defineReactive(obj, key, value) {
     // vue2慢的原因 主要在这个方法中
-    observe(value); // 递归进行观测数据 不管有多少层 我都进行defineProperty
+    const childOb = observe(value); // 递归进行观测数据 不管有多少层 我都进行defineProperty
+    // childOb 如果有值 那么就是数组或对象
     const dep = new Dep(); // 每个属性都增加了一个dep
     Object.defineProperty(obj, key, {
       get() {
         // 后续会有很多逻辑
         if (Dep.target) {
           dep.depend();
+          if (childOb) {
+            childOb.dep.depend(); // 取属性的时候 会对对应的值（对象本身和数组）进行依赖收集
+            if (Array.isArray(value)) {
+              // 可能是数组套数组
+              dependArray(value);
+            }
+          }
         }
         return value; // 闭包，次此value 会像上层的value进行查找
       },
@@ -166,10 +283,11 @@
         if (newValue === value) return;
         observe(newValue);
         value = newValue;
-        dep.notify();
+        dep.notify(); // 拿到当前的dep里面的watcher依次执行
       }
     });
   }
+
   function observe(value) {
     // 1.如果value不是对象 那么就不用观测了 说明写的有问题
     if (!isObject(value)) {
@@ -183,6 +301,13 @@
     // 如果一个数据已经被观测过了 就不要在进行观测了 用类来实现 我管测过就增加一个标识 说明观测过了 在观测的时候可以先检测是否观测过 如果观测过了就跳过
     return new Observer(value);
   }
+
+  // 1.默认vue在初始化的时候 会对对象每一个属性都进行劫持 增加dep属性 当取值的时候会做依赖收集
+  // 2.默认还会对属性值（对象和数组的本身进行增加dep属性）进行依赖收集
+  // 3.如果是属性变化 触发属性对应的dep去更新
+  // 4.如果是数组更新 触发数组的本身dep进行更新
+  // 5.如果取值的时候是数组还要让数组中的对象类型也进行依赖收集（递归依赖收集）
+  // 6.如果数组里面放对象 默认对象里的属性实惠进行依赖收集的 因为在取值时 会进行JSON.stringify操作
 
   function initState(vm) {
     const opts = vm.$options;
@@ -454,9 +579,12 @@
       vm._update(vm._render()); // render() _c _v _s
     };
     // 每个组件都有一个watcher 我们把这个watcher称之为渲染watcher
+    callHook(vm, 'beforeCreate');
     new Watcher(vm, updateComponent, () => {
       console.log('后续增添更新钩子函数 update');
+      callHook(vm, 'created');
     }, true);
+    callHook(vm, 'mounted');
   }
   function lifeCycleMixin(Vue) {
     Vue.prototype._update = function (vnode) {
@@ -465,6 +593,12 @@
       vm.$el = patch(vm.$el, vnode);
     };
   }
+  function callHook(vm, hook) {
+    const handlers = vm.$options[hook];
+    handlers && handlers.forEach(item => {
+      item.call(vm); // 生命周期的this永远指向实例
+    });
+  }
 
   function initMixin(Vue) {
     // 后续组件化开发的时候 Vue.extend 可以创造一个子组件 子组件可以继承Vue 子组件也可以调用_init方法
@@ -472,7 +606,7 @@
       const vm = this;
 
       // 把用户的选项放到vue上，这样在其他地方中都可以获取到options了
-      vm.$options = options; // 为了后续扩展的方法都可以获取$options选项
+      vm.$options = mergeOptions(vm.constructor.options, options); // 为了后续扩展的方法都可以获取$options选项
 
       // options中用户传入的数据 el data
       initState(vm);
@@ -513,6 +647,7 @@
       // 这里已经获取到了一个render函数 这个函数他的返回值 _c('div',{id:'app'},_c('span',undefined,'hello'))
       mountComponent(vm);
     };
+    Vue.prototype.$nextTick = nextTick;
   }
 
   function createElement(vm, tag, data = {}, ...children) {
@@ -565,6 +700,17 @@
     };
   }
 
+  function initGlobalAPI(Vue) {
+    Vue.options = {}; // 全局属性 , 在每个组件初始化的时候 将这些属性放到每个组件上
+    Vue.mixin = function (options) {
+      this.options = mergeOptions(this.options, options);
+      return this;
+    };
+    Vue.component = function name(params) {};
+    Vue.filter = function name(params) {};
+    Vue.directive = function name(params) {};
+  }
+
   // vue要如何实现 原型模式 所有的功能都通过原型扩展的方式来添加
   function Vue(options) {
     this._init(options); // 实现vue的初始化功能
@@ -573,6 +719,7 @@
   initMixin(Vue);
   renderMixin(Vue);
   lifeCycleMixin(Vue);
+  initGlobalAPI(Vue);
 
   // 1.new Vue 会调用_init方法进行初始化操作
   // 2.会将用户的选项放到 vm._options 上

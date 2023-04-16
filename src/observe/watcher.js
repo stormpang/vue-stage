@@ -1,4 +1,5 @@
 import Dep from "./dep";
+import {queueWatcher} from "../scheduler";
 
 let id = 0
 
@@ -30,10 +31,15 @@ class Watcher {
     Dep.target = null // 渲染完毕后 就将标识清空了 只有在渲染的时候才会进行依赖收集
   }
 
-  update() {
-    console.log('update')
-
+  update() { // 每次更新数据都会同步调用这个update方法 我可以将更新的逻辑缓存起来 等会同步更新数据的逻辑执行完毕后 依次调用（去重的逻辑）
+    console.log('缓存更新')
+    queueWatcher(this)
     // 可以做异步更新处理
+    // this.get() // vue.nextTick [fn1,fn2,fn3]
+  }
+
+  run() {
+    console.log('真正执行更新')
     this.get()
   }
 }

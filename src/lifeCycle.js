@@ -7,9 +7,12 @@ export function mountComponent(vm) {
     vm._update(vm._render()) // render() _c _v _s
   }
   // 每个组件都有一个watcher 我们把这个watcher称之为渲染watcher
+  callHook(vm, 'beforeCreate')
   new Watcher(vm, updateComponent, () => {
     console.log('后续增添更新钩子函数 update')
+    callHook(vm, 'created');
   }, true)
+  callHook(vm, 'mounted')
 }
 
 export function lifeCycleMixin(Vue) {
@@ -20,3 +23,9 @@ export function lifeCycleMixin(Vue) {
   }
 }
 
+export function callHook(vm, hook) {
+  const handlers = vm.$options[hook]
+  handlers && handlers.forEach(item => {
+    item.call(vm) // 生命周期的this永远指向实例
+  })
+}
