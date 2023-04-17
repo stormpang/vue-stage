@@ -9,24 +9,20 @@
 </head>
 
 <body>
-<div id="app"></div>
+<div id="app">
+  <!--  <span>{{name}}</span>-->
+</div>
 <script src="./vue.js"></script>
 <script>
-  // 一般常见的情况 给所有的组件 都增加一些生命周期
-  // Vue中的生命周期是如何实现的？钩子方法（回调）
-  let vm = new Vue({
-    el: "#app",
-    beforeCreate: [ // 生命周期的合并 需要将两个生命周期进行合并
-      function () {
-        console.log('局部额第一个')
-      },
-      function () {
-        console.log('局部额第二个')
-      }
-    ],
-  });
-  console.log(vm.$options)
+  // let vm = new Vue({
+  //   el: '#app',
+  //   data() {
+  //     return {name: 'zf'}
+  //   }
+  // });
+  // setTimeout(() => {
+  //   vm.name = 'jw'
+  // }, 1000);
 </script>
 </body>
-
 </html>

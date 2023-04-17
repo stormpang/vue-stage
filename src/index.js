@@ -2,6 +2,8 @@ import {initMixin} from './init'
 import {renderMixin} from "./render";
 import {lifeCycleMixin} from "./lifeCycle";
 import {initGlobalAPI} from "./global-api";
+import {compileToFunction} from "./compiler";
+import {createElm, patch} from "./vnode/patch";
 
 // vue要如何实现 原型模式 所有的功能都通过原型扩展的方式来添加
 function Vue(options) {
@@ -13,6 +15,40 @@ renderMixin(Vue)
 lifeCycleMixin(Vue)
 
 initGlobalAPI(Vue)
+
+// 先生成一个虚拟节点
+let vm = new Vue({
+  data() {
+    return {name: 'jw'}
+  }
+})
+let render = compileToFunction((`<div>
+  <li key="A" style="color: red">A</li>
+  <li key="B" style="color: blue">B</li>
+  <li key="C" style="color: green">C</li>
+  <li key="D" style="color: grey">D</li>
+</div>`))
+let oldVnode = render.call(vm)
+let el = createElm(oldVnode)
+document.body.appendChild(el)
+
+// 再生成一个新的虚拟节点 patch
+const vm2 = new Vue({
+  data() {
+    return {name: 'zf'}
+  }
+})
+const render2 = compileToFunction(`<div>
+  <li key="F" style="color: red">F</li>
+  <li key="B" style="color: blue">B</li>
+  <li key="A" style="color: red">A</li>
+  <li key="E" style="color: green">E</li>
+  <li key="P" style="color: grey">P</li>
+</div>`)
+const newVnode = render2.call(vm2)
+setTimeout(() => {
+  patch(oldVnode, newVnode) // 比对两个虚拟节点的差异 更新需要更新的地方
+}, 2000)
 
 // 导出Vue给别人使用
 export default Vue
