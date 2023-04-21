@@ -764,9 +764,16 @@
     Vue.prototype._update = function (vnode) {
       // 采用的是 先序深度遍历 创建节点（遇到节点就创造节点 递归创建）
       const vm = this;
+      const preVnode = vm._prevVnode;
       // 第一次渲染 是根据虚拟节点 生成真实节点 替换掉原来的节点
+      vm._prevVnode = vnode;
       // 如果是第二次 生成一个新的虚拟节点 和老的虚拟节点进行对比
-      vm.$el = patch(vm.$el, vnode);
+      if (!preVnode) {
+        // 没有节点就是初次渲染
+        vm.$el = patch(vm.$el, vnode);
+      } else {
+        vm.$el = patch(preVnode, vnode);
+      }
     };
   }
   function callHook(vm, hook) {
@@ -873,44 +880,6 @@
   renderMixin(Vue);
   lifeCycleMixin(Vue);
   initGlobalAPI(Vue);
-
-  // 先生成一个虚拟节点
-  let vm = new Vue({
-    data() {
-      return {
-        name: 'jw'
-      };
-    }
-  });
-  let render = compileToFunction(`<div>
-  <li key="A" style="color: red">A</li>
-  <li key="B" style="color: blue">B</li>
-  <li key="C" style="color: green">C</li>
-  <li key="D" style="color: grey">D</li>
-</div>`);
-  let oldVnode = render.call(vm);
-  let el = createElm(oldVnode);
-  document.body.appendChild(el);
-
-  // 再生成一个新的虚拟节点 patch
-  const vm2 = new Vue({
-    data() {
-      return {
-        name: 'zf'
-      };
-    }
-  });
-  const render2 = compileToFunction(`<div>
-  <li key="F" style="color: red">F</li>
-  <li key="B" style="color: blue">B</li>
-  <li key="A" style="color: red">A</li>
-  <li key="E" style="color: green">E</li>
-  <li key="P" style="color: grey">P</li>
-</div>`);
-  const newVnode = render2.call(vm2);
-  setTimeout(() => {
-    patch(oldVnode, newVnode); // 比对两个虚拟节点的差异 更新需要更新的地方
-  }, 2000);
 
   // 1.new Vue 会调用_init方法进行初始化操作
   // 2.会将用户的选项放到 vm._options 上
