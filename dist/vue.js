@@ -53,6 +53,16 @@
       }
     };
   });
+  strats.components = function (parentVal, childVal) {
+    // childVal.__proto__ = parentVal
+    const res = Object.create(parentVal); // 合并后生成一个新对象 不用原来的
+    if (childVal) {
+      for (let key in childVal) {
+        res[key] = childVal[key];
+      }
+    }
+    return res;
+  };
   function mergeOptions(parentVal, childVal) {
     const options = {};
     for (let key in parentVal) {
@@ -74,6 +84,13 @@
     }
     return options;
   }
+  function makeMap(str) {
+    let tagList = str.split(',');
+    return function (tagName) {
+      return tagList.includes(tagName);
+    };
+  }
+  const isReservedTag = makeMap('template,script,style,element,content,slot,link,meta,svg,view,button,' + 'a,div,img,image,text,span,input,switch,textarea,spinner,select,' + 'slider,slider-neighbor,indicator,canvas,' + 'list,cell,header,loading,loading-indicator,refresh,scrollable,scroller,' + 'video,web,embed,tabbar,tabheader,datepicker,timepicker,marquee,countdown');
 
   let oldArrayPrototype = Array.prototype; // 获取数组的老的原型方法
 
@@ -537,8 +554,41 @@
   // 3.组件化开发（贯穿了vue的流程）
   // 4.diff算法
 
+  function createComponent$1(vm, tag, data, children, key, Ctor) {
+    if (isObject(Ctor)) {
+      // 组件的定义一定是通过Vue.extend 进行包裹的
+      Ctor = vm.$options._base.extend(Ctor);
+    }
+    data.hook = {
+      // 组件的生命周期
+      init(vnode) {
+        // vnode.componentInstance.$el -> 对应组件渲染完毕后的结果
+        let child = vnode.componentInstance = new Ctor({}); //我想获取组件的真实dom
+        child.$mount(); // 所以组件在走挂载的流程时 vm.$el 为null
+
+        // mount挂载完毕后 会产生一个真实节点，这个节点在 vm.$el上-》 对应的就是组件的真实内容
+      },
+
+      prepatch() {},
+      postpatch() {}
+      ///
+    };
+    // 每个组件 默认的名字内部会给你拼接一下  vue-component-1-my-button
+    let componentVnode = vnode(vm, tag, data, undefined, key, undefined, {
+      Ctor,
+      children,
+      tag
+    }); // componentOptions 存放了一个重要的属性交Ctor 构造函数
+    return componentVnode;
+  }
   function createElement(vm, tag, data = {}, ...children) {
-    // 返回虚拟节点
+    // 返回虚拟节点 _c('',{}....)
+
+    // 如果区分是组件还是元素节点？
+    if (!isReservedTag(tag)) {
+      let Ctor = vm.$options.components[tag]; // 组件的初始化 就是new 组件的构造函数
+      return createComponent$1(vm, tag, data, children, data.key, Ctor);
+    }
     return vnode(vm, tag, data, children, data.key, undefined);
   }
   function createText(vm, text) {
@@ -546,73 +596,83 @@
     return vnode(vm, undefined, undefined, undefined, undefined, text);
   }
 
-  // 看两个节点是不是相同节点 就看是不是tag和key一样
-  // Vue2就有一个性能问题 递归比对
+  // 看两个节点是不是相同节点，就看是不是 tag 和 key都一样
+  // vue2 就有一个性能问题 ， 递归比对
   function isSameVnode(newVnode, oldVnode) {
-    return newVnode.tag === oldVnode.tag && newVnode.key === oldVnode.key;
+    return newVnode.tag === oldVnode.tag && newVnode.key == oldVnode.key;
   }
-  function vnode(vm, tag, data, children, key, text) {
+  function vnode(vm, tag, data, children, key, text, options) {
     return {
       vm,
       tag,
       data,
       children,
       key,
-      text
+      text,
+      componentOptions: options
     };
   }
 
-  // vnode 其实就是一个对象 用来描述节点的 这个和ast长的很像啊？
-  // ast描述语法 他并没有用户自己的逻辑 只有语法解析出来的内容
-  // vnode他是描述dom结构的 可以自己去扩展属性
-
   function patch(oldVnode, vnode) {
+    if (!oldVnode) {
+      // 组件的挂载流程
+      return createElm(vnode); // 产生一个组件的真实节点
+    }
+
     const isRealElement = oldVnode.nodeType;
     if (isRealElement) {
-      // 删除老节点 根据vnode创建新节点 替换掉老节点
-      const elm = createElm(vnode); // 根据虚拟节点创造了真实节点
+      // 删除老节点 根据vnode创建新节点，替换掉老节点
+      const elm = createElm(vnode);
       const parentNode = oldVnode.parentNode;
-      parentNode.insertBefore(elm, oldVnode.nextSibling); // el.nextSibling不存在就是null 如果为null nextSibling就是appendChild
+      parentNode.insertBefore(elm, oldVnode.nextSibling);
       parentNode.removeChild(oldVnode);
       return elm; // 返回最新节点
     } else {
-      // 只比较同级 如果不一样 儿子就不用比对了 根据当前节点 创建儿子 全部替换掉
-      // diff算法如何实现？
+      // 不管怎么diff 最终想更新渲染 =》 dom操作里去
+
+      // 只比较同级，如果不一样，儿子就不用比对了， 根据当前节点，创建儿子 全部替换掉
+      // diff 算法如何实现？
       if (!isSameVnode(oldVnode, vnode)) {
-        // 如果新旧节点不是同一个 删除老的换成新的
+        // 如果新旧节点 不是同一个，删除老的换成新的
         return oldVnode.el.parentNode.replaceChild(createElm(vnode), oldVnode.el);
       }
-      const el = vnode.el = oldVnode.el; // 复用节点
+
+      // 文本直接更新即可，因为文本没有儿子
+      let el = vnode.el = oldVnode.el; // 复用节点
       if (!oldVnode.tag) {
-        // 文本了 一个是文本 那么另一个一定也是文本
+        // 文本了, 一个是文本 那么另一个一定也是文本
         if (oldVnode.text !== vnode.text) {
           return el.textContent = vnode.text;
         }
       }
-      // 元素 新的虚拟节点
+      // 元素  新的虚拟节点
       updateProperties(vnode, oldVnode.data);
-      // 是相同节点了 复用节点 再更新不一样的地方（属性）
+      // 是相同节点了，复用节点，在更新不一样的地方 （属性）
 
       // 比较儿子节点
       let oldChildren = oldVnode.children || [];
       let newChildren = vnode.children || [];
-      if (oldChildren.length > 0 && newChildren.length === 0) {
-        // 情况1：老的有儿子 新的没儿子
+
+      // 情况1 ：老的有儿子 ， 新没儿子
+
+      if (oldChildren.length > 0 && newChildren.length == 0) {
         el.innerHTML = '';
-      } else if (newChildren.length > 0 && oldChildren.length === 0) {
-        // 情况2：新的有儿子 老的没儿子
+        // 新的有儿子 老的没儿子 直接将新的插入即可
+      } else if (newChildren.length > 0 && oldChildren.length == 0) {
         newChildren.forEach(child => el.appendChild(createElm(child)));
       } else {
         // 新老都有儿子
-        updateChilren(el, oldChildren, newChildren);
+        updateChildren(el, oldChildren, newChildren);
       }
       return el;
     }
   }
-  function updateChilren(el, oldChildren, newChildren) {
-    // Vue2中如何做的diff算法
-    // Vue内部做了优化（能尽量提升性能 如果实在不行 再暴力比对）
+  function updateChildren(el, oldChildren, newChildren) {
+    // vue2中 如何做的diff算法
+
+    // vue内部做了优化 （能尽量提升性能，如果实在不行，在暴力比对）
     // 1.在列表中新增和删除的情况
+
     let oldStartIndex = 0;
     let oldStartVnode = oldChildren[0];
     let oldEndIndex = oldChildren.length - 1;
@@ -622,7 +682,7 @@
     let newEndIndex = newChildren.length - 1;
     let newEndVnode = newChildren[newEndIndex];
     function makeKeyByIndex(children) {
-      const map = {};
+      let map = {};
       children.forEach((item, index) => {
         map[item.key] = index;
       });
@@ -630,7 +690,7 @@
     }
     let mapping = makeKeyByIndex(oldChildren);
 
-    // diff算法的复杂度是O(n) 比对的时候 指针交叉的时候 就是比对完成了
+    // diff算法的复杂度 是O(n)  比对的时候 指针交叉的时候 就是比对完成了
     while (oldStartIndex <= oldEndIndex && newStartIndex <= newEndIndex) {
       if (!oldStartVnode) {
         // 在指针移动的时候 可能元素已经被移动走了，那就跳过这一项
@@ -648,26 +708,26 @@
         oldEndVnode = oldChildren[--oldEndIndex];
         newEndVnode = newChildren[--newEndIndex];
       } else if (isSameVnode(oldStartVnode, newEndVnode)) {
-        // 头尾比较
+        // 头尾
         patch(oldStartVnode, newEndVnode);
         el.insertBefore(oldStartVnode.el, oldEndVnode.el.nextSibling);
         oldStartVnode = oldChildren[++oldStartIndex];
         newEndVnode = newChildren[--newEndIndex];
       } else if (isSameVnode(oldEndVnode, newStartVnode)) {
-        // 尾头比较
+        // 尾头
         patch(oldEndVnode, newStartVnode);
         el.insertBefore(oldEndVnode.el, oldStartVnode.el); // 将尾部的插入到头部去
         oldEndVnode = oldChildren[--oldEndIndex];
         newStartVnode = newChildren[++newStartIndex];
       } else {
         // 之前的逻辑都是考虑 用户一些特殊情况，但是有非特殊的，乱序排
-        const moveIndex = mapping[newStartVnode.key];
-        if (moveIndex === undefined) {
-          // 没有 直接将节点插入到开头的前面
+        let moveIndex = mapping[newStartVnode.key];
+        if (moveIndex == undefined) {
+          // 没有直接将节点插入到开头的前面
           el.insertBefore(createElm(newStartVnode), oldStartVnode.el);
         } else {
-          // 有 需要复用
-          const moveVnode = oldChildren[moveIndex]; // 找到复用的那个人 将他移动到前面去
+          // 有的话需要复用
+          let moveVnode = oldChildren[moveIndex]; // 找到复用的那个人，将他移动到前面去
           patch(moveVnode, newStartVnode);
           el.insertBefore(moveVnode.el, oldStartVnode.el);
           oldChildren[moveIndex] = undefined; // 将移动的节点标记为空
@@ -677,21 +737,32 @@
       }
     }
     if (newStartIndex <= newEndIndex) {
-      // 新的多 那么就将多的插入进去即可
+      // 新的多，那么就将多的插入进去即可
       // 如果下一个是null 就是appendChild
-      const anchor = newChildren[newEndIndex + 1] == null ? null : newChildren[newEndIndex + 1].el; // 参照物固定
+      let anchor = newChildren[newEndIndex + 1] == null ? null : newChildren[newEndIndex + 1].el; // 参照物是固定的
       for (let i = newStartIndex; i <= newEndIndex; i++) {
-        // 看一下当前尾节点的下一个元素是否存在 如果存在则是插入到下一个元素的前面
-        // 这里可能是向前追加 可能是向后追加
+        // 看一下 当前尾节点的下一个元素是否存在，如果存在则是插入到下一个元素的前面
+        // 这里可能是向前追加 可能是像后追加
         el.insertBefore(createElm(newChildren[i]), anchor);
       }
     }
     if (oldStartIndex <= oldEndIndex) {
-      // 老的多余 需要清理掉 直接删除即可
+      // 老的多余的  ,需要清理掉，直接删除即可
       for (let i = oldStartIndex; i <= oldEndIndex; i++) {
-        const child = oldChildren[i]; // 因为child可能是undefined 所以要跳过空间点
+        let child = oldChildren[i]; // 因为child可能是undefined 所有要跳过空间点
         child && el.removeChild(child.el);
       }
+    }
+  }
+  function createComponent(vnode) {
+    // 给组件预留了 一个初始化流程 init
+    let i = vnode.data;
+    if ((i = i.hook) && (i = i.init)) {
+      i(vnode);
+    }
+    if (vnode.componentInstance) {
+      // 说明是组件
+      return true;
     }
   }
   function createElm(vnode) {
@@ -702,13 +773,17 @@
       text,
       vm
     } = vnode;
-    // 我们让虚拟节点和真实节点做一个映射关系 后续某个虚拟节点更新了 我可以跟踪到真实节点 并且更新真实节点
     if (typeof tag === 'string') {
-      vnode.el = document.createElement(tag);
-      // 如果有data属性 我们需要把data设置到元素上
+      if (createComponent(vnode)) {
+        // 返回一个组件的真实节点
+        return vnode.componentInstance.$el; // 对应的就是真实节点
+      }
+
+      vnode.el = document.createElement(tag); // 先创建id app
       updateProperties(vnode);
       children.forEach(child => {
-        vnode.el.appendChild(createElm(child));
+        // 再去查找id app的儿子，对儿子进行创建 {tag:'组件',componentOptions}
+        vnode.el.appendChild(createElm(child)); // createElm(child) 有创建组件和元素的功能
       });
     } else {
       vnode.el = document.createTextNode(text);
@@ -716,24 +791,25 @@
     return vnode.el;
   }
   function updateProperties(vnode, oldProps = {}) {
-    // 这里的逻辑 可能是初次渲染 初次渲染直接用oldProps 给vnode的el赋值即可
-    // 更新的逻辑 拿到老的props和vnode里面的data进行比对
-    const el = vnode.el; // dom真实的节点
-    const newProps = vnode.data || {};
-    // 新旧比对 两个对象如何比对差异？
-    const newStyle = newProps.style || {};
-    const oldStyle = oldProps.style || {};
+    // 这里的逻辑 可能是初次渲染，初次渲染 直接 用oldProps 给vnode的el赋值即可
+    // 更新逻辑 拿到老的props 和 vnode里面的data进行比对
+    let el = vnode.el; // dom真实的节点
+    let newProps = vnode.data || {};
+    // 新旧比对， 两个对象如何比对差异？
+    let newStyle = newProps.style || {};
+    let oldStyle = oldProps.style || {};
     for (let key in oldStyle) {
+      // 老的样式有 新的没有，就把页面上的样式删除掉
       if (!newStyle[key]) {
-        // 老的样式有 新的没有 就把页面上的样式删除掉
         el.style[key] = '';
       }
     }
     for (let key in newProps) {
-      // 直接用新的盖掉老的就可以了
-      // 如果前后一样 浏览器回去检测
-      if (key === 'style') {
+      //  直接用新的改掉老的就可以了
+      // 如果前后一样，浏览器会去检测
+      if (key == 'style') {
         for (let key in newStyle) {
+          // {style:{color:red}}
           el.style[key] = newStyle[key];
         }
       } else {
@@ -789,6 +865,7 @@
       const vm = this;
 
       // 把用户的选项放到vue上，这样在其他地方中都可以获取到options了
+      // 因为全局定义的内容 回魂合在当前的实例上
       vm.$options = mergeOptions(vm.constructor.options, options); // 为了后续扩展的方法都可以获取$options选项
 
       // options中用户传入的数据 el data
@@ -818,7 +895,7 @@
       vm.$el = el; // 页面真实元素
 
       if (!opts.render) {
-        // 模版变异
+        // 模版编译
         let template = opts.template;
         if (!template) {
           template = el.outerHTML;
@@ -863,12 +940,44 @@
   function initGlobalAPI(Vue) {
     Vue.options = {}; // 全局属性 , 在每个组件初始化的时候 将这些属性放到每个组件上
     Vue.mixin = function (options) {
+      // Vue.options = 合并后的结果
       this.options = mergeOptions(this.options, options);
       return this;
     };
-    Vue.component = function name(params) {};
-    Vue.filter = function name(params) {};
-    Vue.directive = function name(params) {};
+    // Vue.component -> Vue.extend
+
+    Vue.options._base = Vue;
+    // 等会我通过Vue.extend 方法可以产生一个子类，new 子类的时候会执行代码初始化流程 (组件的初始化)
+    Vue.extend = function (opt) {
+      // 会产生一个子类  data
+      const Super = this;
+      const Sub = function (options) {
+        // 创造一个组件 其实就是 new 这个组件的类 （组件的初始化）
+        this._init(options);
+      };
+      //  Object.create  Object.setPrototypeOf()
+      // Sub.prototype.__proto__ = Super.prototype
+      // function create(parentProtptype){
+      //     const Fn = function(){}
+      //     Fn.prototype = parentProtptype
+      //     return new Fn;
+      // }
+      Sub.prototype = Object.create(Super.prototype); // 继承原型方法
+      Sub.prototype.constructor = Sub; // Object.create 会产生一个新的实例作为 子类的原型，此时constructor 会指向错误
+      Sub.options = mergeOptions(Super.options, opt); // 需要让子类 能拿到 我们Vue定义的全局组件
+
+      return Sub;
+    };
+    Vue.options.components = {}; // 存放全局组件的
+    Vue.component = function (id, definition) {
+      // definition 可以传入对象或者函数
+      let name = definition.name || id;
+      definition.name = name;
+      if (isObject(definition)) {
+        definition = Vue.extend(definition);
+      }
+      Vue.options.components[name] = definition; // 维护关系
+    };
   }
 
   // vue要如何实现 原型模式 所有的功能都通过原型扩展的方式来添加
@@ -897,6 +1006,13 @@
   // 2.当渲染视图的时候，会取data的数据，会走每个属性的get方法，就让这个属性的dep记录watcher
   // 3. 同时让watcher也记住dep（这个逻辑目前没用到）dep和watcher是多对多的关系，因为一个属性可能对应多个视图，一个视图对应多个数据
   // 4.如果数据发生变化，会通知对应属性的dep，依次通知存放的watcher去更新
+
+  // 1.Vue.component 注册成全局组件 内部会自动调用Vue.extend方法 返回组件的构造函数
+  // 2.组件初始化的时候 会做一个合并mergeOptions（自己的组件.__proto__ = 全局的组件）
+  // 3.内部会对模版进行编译操作 _c('组件的名字')做筛查如果是组件就创造一个组件的虚拟节点 还会判断Ctor 如果对象会调用Vue.extend 所有的组件通过Vue.extend方法来实现的（componentOptions 里面放着组件的所有内容 属性的实现 事件的实现 插槽内容 Ctor）
+  // 4. 创建组件的真实节点（new Ctor 拿到组件的实例 并且调用组件的$mount方法 会生成一个$el对应组件模版渲染后的结果）vnode.componentInstance = new Ctor() vnode.componentInstance.$el => 组件渲染后结果
+  // 5. 将组件的vnode.componentInstance.$el 插入到父标签中
+  // 6. 组件在 new Ctor() 时 会进行组件的初始化 给组件再次添加一个独立的渲染watcher（每个组件都有自己的watcher）更新时 只需要更新自己组件对应的渲染watcher（因为组件渲染时 组件对应的属性回收机自己的渲染watcher）
 
   return Vue;
 

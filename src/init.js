@@ -9,6 +9,7 @@ export function initMixin(Vue) {
     const vm = this
 
     // 把用户的选项放到vue上，这样在其他地方中都可以获取到options了
+    // 因为全局定义的内容 回魂合在当前的实例上
     vm.$options = mergeOptions(vm.constructor.options, options) // 为了后续扩展的方法都可以获取$options选项
 
     // options中用户传入的数据 el data
@@ -39,7 +40,7 @@ export function initMixin(Vue) {
     vm.$el = el // 页面真实元素
 
     if (!opts.render) {
-      // 模版变异
+      // 模版编译
       let template = opts.template
       if (!template) {
         template = el.outerHTML

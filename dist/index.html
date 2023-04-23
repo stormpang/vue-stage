@@ -9,20 +9,38 @@
 </head>
 
 <body>
+<!-- 组件的设计理念 webComponent 原生支持自定义标签 -->
+<!-- ast -> render -> _c -->
+
 <div id="app">
-  <span>{{name}}</span>
+  <my-button></my-button>
+  <my-button></my-button>
 </div>
 <script src="./vue.js"></script>
 <script>
-  let vm = new Vue({
+  // Vue.component('my-button', { // 全局组件  Vue.extend 处理后就是一个构造函数
+  //   template: '<button>您好， ok {{name}}</button>',
+  //   data() {
+  //     return {name: 'ricardo'}
+  //   }
+  // });
+  // 原型的概念
+  new Vue({
     el: '#app',
-    data() {
-      return {name: 'zf'}
+    components: { // 这里没有处理
+      'my-button': { // 局部组件， 组件他肯定有自己的一个查找方式，作用域链，先找自己的自己的找不到在向上查找
+        template: '<div><button>不好, no {{name}}</button> <xxx></xxx></div>',
+        components: {
+          xxx: {
+            template: '<div>哈哈</div>'
+          }
+        },
+        data() {
+          return {name: '赵日天'}
+        }
+      }
     }
-  });
-  setTimeout(() => {
-    vm.name = 'jw'
-  }, 1000);
+  })
 </script>
 </body>
 </html>
